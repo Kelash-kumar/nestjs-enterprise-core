@@ -77,3 +77,7 @@ Validation performed: 63 unit/infrastructure tests and 105 real PostgreSQL tests
 ## Managed login approval (migration 7)
 
 Admin-managed creation records accessApprovedAt and accessApprovedBy in the same transaction as the account and role grants. Public registration never receives approval. Authentication, JWT validation, refresh, password confirmation and recovery-manager invariants recognize this separate approval; inactive, archived and locked accounts remain blocked. Enable Login sends PATCH /api/v1/crm/users/:id (or admins/:id) with {"allowLogin":true}. It does not change passwords, roles or mailbox verification and cannot reactivate a suspended account. User records use Login as User; admin login still requires admin.access. An enabled email second factor remains mandatory and successful code verification also verifies that mailbox. Email-based recovery retains its verification requirements. No historical accounts are automatically approved by the migration.
+
+## Extending the CRM
+
+Register the entity, searchable fields, allowed sort fields and export columns in `src/features/crm/crm-modules.ts`. The list and export endpoints share this registry. Add the module’s validated write DTOs and service operations, define its permissions, and cover its allowed and denied operations in the PostgreSQL suite.

@@ -27,7 +27,8 @@ import type { Principal } from '../auth/interfaces/auth.types';
 import { AuthOriginGuard } from '../auth/guards/origin.guard';
 import { RawResponse } from '../../common/http/response.decorator';
 import { createValidationPipe } from '../../common/http/validation.pipe';
-import { CrmService, crmKind } from './crm.service';
+import { CrmService } from './crm.service';
+import { crmKind, crmModules } from './crm-modules';
 import { CrmQueryDto, CrmBulkDto, CrmRoleDto, CreateCrmUserDto, UpdateCrmUserDto } from './crm.dto';
 import { CreateCompanyDto, UpdateCompanyDto } from '../companies/dto/company.dto';
 import { exportRecords } from './crm-export';
@@ -73,25 +74,6 @@ export class CrmController {
       rows.push(...(result.data as unknown as Record<string, unknown>[]));
       if (!result.meta.hasNextPage) break;
     }
-    const columns =
-      kind === 'users' || kind === 'admins'
-        ? [
-            'id',
-            'fullName',
-            'username',
-            'email',
-            'phone',
-            'companyId',
-            'notificationChannel',
-            'twoFactor',
-            'createdAt',
-            'deletedAt',
-          ]
-        : kind === 'companies'
-          ? ['id', 'name', 'email', 'phone', 'website', 'address', 'createdAt', 'deletedAt']
-          : kind === 'roles'
-            ? ['id', 'name', 'guard', 'description', 'createdAt']
-            : ['id', 'name', 'resource', 'action', 'createdAt'];
     const format = query.format ?? 'csv';
     response.setHeader('Cache-Control', 'no-store');
     response.type(
@@ -100,7 +82,7 @@ export class CrmController {
         : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
     response.attachment(kind + '.' + format);
-    response.send(exportRecords(rows, columns, format));
+    response.send(exportRecords(rows, crmModules[kind].export, format));
   }
   @Get(':module/:id')
   find(

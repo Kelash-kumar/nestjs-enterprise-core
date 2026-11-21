@@ -2,14 +2,14 @@
   "name": "nestjs-auth-foundation",
   "version": "0.5.1",
   "private": true,
-  "description": "Reusable NestJS backend foundation — phase 5",
+  "description": "Reusable NestJS backend foundation \u2014 phase 5",
   "engines": {
     "node": ">=22.13 <23 || >=24.11"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js",
-    "start:dev": "nodemon --watch src --ext ts --exec \"ts-node src/main.ts\"",
+    "build": "node init && tsc -p tsconfig.build.json",
+    "start": "node init && node dist/main.js",
+    "start:dev": "node init && nodemon --watch src --ext ts --exec \"ts-node src/main.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
     "test:unit": "jest --runInBand --testPathPattern=src",

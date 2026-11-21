@@ -106,18 +106,12 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiSuccess([CredentialsDto, LoginChallengeDto])
   @ApiBody({ type: LoginDto })
-  async login(
+  login(
     @Body() input: LoginDto,
     @Req() request: AuthRequest,
     @Res({ passthrough: true }) response: Response,
   ) {
-    if (!request.loginIdentity) throw new UnauthorizedException('Authentication required');
-    const result = await this.sessions.login(request.loginIdentity, {
-      name: input.deviceName,
-      userAgent: request.headers['user-agent'],
-      ip: request.ip,
-    });
-    return 'mfaRequired' in result ? result : this.cookies.write(response, result);
+    return this.startLogin(input, request, response, false);
   }
 
   @Post('admin/login')
@@ -128,10 +122,19 @@ export class AuthController {
   @ApiSuccess([CredentialsDto, LoginChallengeDto])
   @ApiBody({ type: LoginDto })
   @ApiOperation({ summary: 'Login to the admin portal; requires current admin.access permission' })
-  async adminLogin(
+  adminLogin(
     @Body() input: LoginDto,
     @Req() request: AuthRequest,
     @Res({ passthrough: true }) response: Response,
+  ) {
+    return this.startLogin(input, request, response, true);
+  }
+
+  private async startLogin(
+    input: LoginDto,
+    request: AuthRequest,
+    response: Response,
+    adminPortal: boolean,
   ) {
     if (!request.loginIdentity) throw new UnauthorizedException('Authentication required');
     const result = await this.sessions.login(
@@ -141,7 +144,7 @@ export class AuthController {
         userAgent: request.headers['user-agent'],
         ip: request.ip,
       },
-      true,
+      adminPortal,
     );
     return 'mfaRequired' in result ? result : this.cookies.write(response, result);
   }

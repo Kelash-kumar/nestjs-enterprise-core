@@ -1,3 +1,4 @@
+import { escapeLike } from '../../common/persistence/escape-like';
 import {
   BadRequestException,
   ConflictException,
@@ -34,15 +35,8 @@ import type {
 import type { CreateCompanyDto, UpdateCompanyDto } from '../companies/dto/company.dto';
 import { CompaniesRepository } from '../companies/repositories/companies.repository';
 
-const kinds = ['admins', 'users', 'companies', 'roles', 'permissions'] as const;
-export type CrmKind = (typeof kinds)[number];
-export function crmKind(value: string): CrmKind {
-  if (!kinds.includes(value as CrmKind)) throw new NotFoundException('Module not found');
-  return value as CrmKind;
-}
-class CrmRepository {
-  constructor(readonly manager: EntityManager) {}
-}
+import { crmModules, type CrmKind } from './crm-modules';
+
 const profileKeys = [
   'firstName',
   'lastName',
@@ -122,25 +116,19 @@ export class CrmService {
     await this.require(principal, [kind + '.read']);
     if (query.fromDate && query.toDate && new Date(query.fromDate) > new Date(query.toDate))
       throw new BadRequestException('Invalid date range');
-    const target =
-      kind === 'companies'
-        ? CompanyEntity
-        : kind === 'roles'
-          ? RoleEntity
-          : kind === 'permissions'
-            ? PermissionEntity
-            : UserEntity;
-    const builder = this.source.manager.createQueryBuilder(target, 'record');
-    if (kind === 'users' || kind === 'admins')
+    const { entity, search, sort: sortable } = crmModules[kind];
+    const account = entity === UserEntity;
+    const builder = this.source.manager.createQueryBuilder(entity, 'record');
+    if (account)
       builder.andWhere('record.userType ' + (kind === 'admins' ? '=' : '<>') + ' :type', {
         type: 'admin',
       });
-    if (kind === 'users' || kind === 'admins' || kind === 'companies') {
+    if (account || kind === 'companies') {
       if (query.deleted !== 'active') builder.withDeleted();
       if (query.deleted === 'only') builder.andWhere('record.deletedAt IS NOT NULL');
     } else if (query.deleted !== 'active')
       throw new BadRequestException('Deleted filtering is unavailable for this module');
-    if (query.companyId && (kind === 'users' || kind === 'admins'))
+    if (query.companyId && account)
       builder.andWhere('record.companyId=:company', { company: query.companyId });
     if (query.guard && kind === 'roles')
       builder.andWhere('record.guard=:guard', { guard: query.guard });
@@ -149,35 +137,12 @@ export class CrmService {
       builder.andWhere('record.createdAt < :to', {
         to: new Date(new Date(query.toDate.slice(0, 10) + 'T00:00:00.000Z').getTime() + 86400000),
       });
-    const user = kind === 'users' || kind === 'admins';
-    const search = user
-      ? ['email', 'firstName', 'lastName', 'username', 'phone']
-      : kind === 'companies'
-        ? ['name', 'email', 'phone']
-        : ['name'];
     if (query.search?.trim())
       builder.andWhere(
         '(' + search.map((key) => 'record.' + key + ' ILIKE :search').join(' OR ') + ')',
-        { search: '%' + query.search.trim().replace(/[\\%_]/g, '\\$&') + '%' },
+        { search: '%' + escapeLike(query.search) + '%' },
       );
-    const sort = resolveSort(
-      query.sortBy,
-      user
-        ? [
-            'email',
-            'firstName',
-            'lastName',
-            'phone',
-            'notificationChannel',
-            'twoFactor',
-            'createdAt',
-            'status',
-          ]
-        : kind === 'companies'
-          ? ['name', 'email', 'phone', 'createdAt']
-          : ['name', 'createdAt'],
-      'createdAt',
-    );
+    const sort = resolveSort(query.sortBy, sortable, 'createdAt');
     const [data, total] = await builder
       .orderBy('record.' + sort, query.sortOrder === 'asc' ? 'ASC' : 'DESC')
       .addOrderBy('record.id', 'ASC')
@@ -221,6 +186,23 @@ export class CrmService {
       permissionIds: grants.directPermissionIds,
     };
   }
+  private async assignablePermissions(
+    manager: EntityManager,
+    actor: Authority,
+    ids: string[],
+    message: string,
+  ) {
+    if (
+      !actor.permissions.includes('permissions.assign') ||
+      !actor.permissions.includes('permissions.revoke')
+    )
+      throw new ForbiddenException(message);
+    const permissions = await manager.getRepository(PermissionEntity).findBy({ id: In(ids) });
+    if (permissions.length !== new Set(ids).size)
+      throw new BadRequestException('Permission not found');
+    for (const permission of permissions) assertPermissionScope(actor, permission.name);
+    return permissions;
+  }
   private async grants(
     manager: EntityManager,
     policy: AuthorizationRepository,
@@ -244,17 +226,12 @@ export class CrmService {
       for (const role of roles) await policy.membership(id, role.id, true);
     }
     if (input.permissionIds !== undefined) {
-      if (
-        !actor.permissions.includes('permissions.assign') ||
-        !actor.permissions.includes('permissions.revoke')
-      )
-        throw new ForbiddenException('Direct permission management is not permitted');
-      const permissions = await manager
-        .getRepository(PermissionEntity)
-        .findBy({ id: In(input.permissionIds) });
-      if (permissions.length !== new Set(input.permissionIds).size)
-        throw new BadRequestException('Permission not found');
-      for (const permission of permissions) assertPermissionScope(actor, permission.name);
+      const permissions = await this.assignablePermissions(
+        manager,
+        actor,
+        input.permissionIds,
+        'Direct permission management is not permitted',
+      );
       await manager.getRepository(UserPermissionEntity).delete({ userId: id });
       for (const permission of permissions) await policy.directPermission(id, permission.id, true);
     }
@@ -278,7 +255,7 @@ export class CrmService {
       [kind + (id ? '.update' : '.create')],
       id ? [id] : [],
       async (policy, actor, scope) => {
-        const manager = scope.get(CrmRepository).manager;
+        const manager = scope.manager;
         if (input.companyId) await scope.get(CompaniesRepository).require(input.companyId);
         if (id) {
           const row = await manager
@@ -318,9 +295,9 @@ export class CrmService {
       id ? ['roles.update'] : ['roles.create', 'roles.delegate'],
       [],
       async (policy, actor, scope) => {
-        const manager = scope.get(CrmRepository).manager;
+        const manager = scope.manager;
+        const role = id ? await policy.role(id) : manager.getRepository(RoleEntity).create();
         if (id) {
-          const role = await policy.role(id);
           assertGrantScope(actor, await policy.roleImpact(id));
           if (
             role.guard !== input.guard &&
@@ -331,25 +308,17 @@ export class CrmService {
           )
             throw new ConflictException('Unassign roles and inheritance before changing guard');
         }
-        const role = id
-          ? await manager.getRepository(RoleEntity).findOneByOrFail({ id })
-          : manager.getRepository(RoleEntity).create();
         role.name = input.name;
         role.guard = input.guard;
         role.description = input.description ?? null;
         const saved = await manager.getRepository(RoleEntity).save(role);
         if (input.permissionIds !== undefined) {
-          if (
-            !actor.permissions.includes('permissions.assign') ||
-            !actor.permissions.includes('permissions.revoke')
-          )
-            throw new ForbiddenException('Permission matrix management is not permitted');
-          const permissions = await manager
-            .getRepository(PermissionEntity)
-            .findBy({ id: In(input.permissionIds) });
-          if (permissions.length !== new Set(input.permissionIds).size)
-            throw new BadRequestException('Permission not found');
-          for (const permission of permissions) assertPermissionScope(actor, permission.name);
+          const permissions = await this.assignablePermissions(
+            manager,
+            actor,
+            input.permissionIds,
+            'Permission matrix management is not permitted',
+          );
           await manager.getRepository(RolePermissionEntity).delete({ roleId: saved.id });
           for (const permission of permissions)
             await policy.rolePermission(saved.id, permission.id, true);
@@ -381,7 +350,7 @@ export class CrmService {
       [kind + '.' + (input.action === 'delete' ? 'delete' : 'restore')],
       kind === 'users' || kind === 'admins' ? ids : [],
       async (policy, actor, scope) => {
-        const manager = scope.get(CrmRepository).manager;
+        const manager = scope.manager;
         for (const id of ids) {
           if (kind === 'roles') {
             await policy.role(id);

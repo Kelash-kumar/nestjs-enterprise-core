@@ -1,3 +1,4 @@
+import { escapeLike } from '../../../common/persistence/escape-like';
 import type { EntityManager } from 'typeorm';
 import { ILike, In } from 'typeorm';
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
@@ -284,7 +285,4 @@ export class AuthorizationRepository {
       query,
     );
   }
-}
-function escapeLike(value: string): string {
-  return value.trim().replace(/[\\%_]/g, '\\$&');
 }

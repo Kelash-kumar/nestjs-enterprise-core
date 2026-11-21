@@ -1,3 +1,4 @@
+import { escapeLike } from '../../../common/persistence/escape-like';
 import { ILike } from 'typeorm';
 import type { EntityManager, FindOptionsWhere } from 'typeorm';
 import { ManagementRepository } from '../../../common/persistence/management.repository';
@@ -40,7 +41,7 @@ export class TypeormUsersRepository
     const where: FindOptionsWhere<UserEntity> = { ...filters };
     if (query.search) {
       // Search treats SQL LIKE metacharacters literally; parameters still handle SQL injection prevention.
-      const literal = query.search.trim().replace(/[\\%_]/g, '\\$&');
+      const literal = escapeLike(query.search);
       where.email = ILike(`%${literal}%`);
     }
     return this.paginate(query, ['id', 'email', 'createdAt', 'updatedAt'], 'createdAt', where);

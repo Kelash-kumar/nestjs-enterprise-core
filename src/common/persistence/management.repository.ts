@@ -1,3 +1,4 @@
+import { escapeLike } from './escape-like';
 import { NotFoundException } from '@nestjs/common';
 import { ILike } from 'typeorm';
 import type { FindOptionsWhere } from 'typeorm';
@@ -16,7 +17,7 @@ export abstract class ManagementRepository<T extends BaseEntity> extends BaseRep
     sortable: readonly (keyof T & string)[],
     filters: FindOptionsWhere<T> = {},
   ) {
-    const literal = query.search?.trim().replace(/[\\%_]/g, '\\$&');
+    const literal = query.search && escapeLike(query.search);
     const where = literal
       ? searchable.map((field) => ({ ...filters, [field]: ILike('%' + literal + '%') }))
       : filters;

@@ -5,9 +5,12 @@ import { mapDatabaseError } from '../../common/errors/database-error';
 
 export class TransactionScope {
   private active = true;
-  constructor(private readonly manager: EntityManager) {}
-  get<T>(repository: new (manager: EntityManager) => T): T {
+  constructor(private readonly transactionManager: EntityManager) {}
+  get manager(): EntityManager {
     if (!this.active) throw new Error('Transaction scope is closed');
+    return this.transactionManager;
+  }
+  get<T>(repository: new (manager: EntityManager) => T): T {
     return new repository(this.manager);
   }
   close(): void {
